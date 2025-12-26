@@ -5,6 +5,7 @@ import math
 import os
 import time
 import threading
+import base64
 from openai import OpenAI
 
 # ================= 配置区域 =================
@@ -12,10 +13,11 @@ from openai import OpenAI
 API_KEY = "ms-f7c7041f-6807-4267-9236-dfc17a724ba0"
 BASE_URL = "https://api-inference.modelscope.cn/v1/"
 
-# 选择模型: 
-# 1. "Qwen/Qwen2.5-72B-Instruct" (纯文本，速度快，稳定)
-# 2. "Qwen/QVQ-72B-Preview" (视觉模型，可看图，但在免费API上可能较慢)
-MODEL_ID = "Qwen/Qwen2.5-72B-Instruct" 
+# 模型选择:
+# 1. 快速反应模型 (Flash): 用于第一时间快速判断和给出核心指令
+FLASH_MODEL_ID = "ZhipuAI/GLM-4v-Flash" 
+# 2. 详细分析模型 (可选): 如果需要更深度的建议，后续可调用 Qwen2.5 或其他大模型
+DETAIL_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
 
 # 报警冷却时间 (秒)，避免重复报警
 ALERT_COOLDOWN = 30 
@@ -28,39 +30,79 @@ client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 last_alert_time = 0
 alert_lock = threading.Lock()
 
-def send_notification(advice):
+def encode_image_to_base64(image):
+    """将 OpenCV 图像转换为 Base64 字符串"""
+    _, buffer = cv2.imencode('.jpg', image)
+    return base64.b64encode(buffer).decode('utf-8')
+
+def send_notification(advice, model_name):
     """
     模拟发送通知给亲友或社区
     """
     print(f"\n{'!'*40}")
-    print(f"【紧急通知】检测到老人跌倒！")
+    print(f"【紧急通知】检测到老人跌倒！(Model: {model_name})")
     print(f"【AI 建议处置方案】:\n{advice}")
     print(f"{'!'*40}\n")
-    # 这里可以接入 钉钉/企业微信/短信 API
-    # requests.post("webhook_url", data={...})
 
-def get_ai_advice(fall_confidence):
+def get_ai_advice_flash(frame, fall_confidence):
     """
-    调用 ModelScope 模型获取急救建议
+    调用 GLM-4v-Flash 视觉模型进行快速反应
     """
-    print("正在请求 AI 急救建议...")
+    print(f"正在请求 {FLASH_MODEL_ID} (视觉模型) 急救建议...")
     try:
-        prompt = f"系统检测到一位老人在家中跌倒，跌倒置信度为 {fall_confidence:.2f}。请立即给出3条简短、核心的急救处理建议，供监护人参考。"
+        # 将当前帧转换为 base64
+        base64_image = encode_image_to_base64(frame)
+        
+        prompt = f"检测到老人跌倒 (置信度 {fall_confidence:.2f})。请根据图片判断严重程度，并立即给出3条简短、核心的急救处理建议。"
         
         response = client.chat.completions.create(
-            model=MODEL_ID,
+            model=FLASH_MODEL_ID,
             messages=[
-                {'role': 'system', 'content': '你是一个专业的医疗急救助手。回答要简练、精准，适合紧急情况阅读。'},
-                {'role': 'user', 'content': prompt}
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text", 
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
             ],
             stream=False
         )
         advice = response.choices[0].message.content
         return advice
     except Exception as e:
-        return f"AI 连接失败，请直接拨打 120。错误信息: {e}"
+        print(f"Flash 模型调用失败: {e}")
+        # 降级方案：使用纯文本模型
+        return get_ai_advice_text_fallback(fall_confidence)
 
-def process_alert(fall_prob):
+def get_ai_advice_text_fallback(fall_confidence):
+    """
+    降级方案：纯文本模型
+    """
+    print(f"降级使用 {DETAIL_MODEL_ID} (文本模型)...")
+    try:
+        prompt = f"系统检测到一位老人在家中跌倒，跌倒置信度为 {fall_confidence:.2f}。请立即给出3条简短、核心的急救处理建议。"
+        response = client.chat.completions.create(
+            model=DETAIL_MODEL_ID,
+            messages=[
+                {'role': 'system', 'content': '你是一个专业的医疗急救助手。'},
+                {'role': 'user', 'content': prompt}
+            ],
+            stream=False
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"所有 AI 连接失败，请直接拨打 120。错误信息: {e}"
+
+def process_alert(fall_prob, frame):
     """
     处理报警的线程函数
     """
@@ -73,11 +115,14 @@ def process_alert(fall_prob):
 
         last_alert_time = current_time
     
-    # 1. 获取 AI 建议
-    advice = get_ai_advice(fall_prob)
+    # 复制当前帧，避免多线程冲突
+    frame_copy = frame.copy()
+    
+    # 1. 获取 AI 建议 (优先使用视觉模型 GLM-4v-Flash)
+    advice = get_ai_advice_flash(frame_copy, fall_prob)
     
     # 2. 发送通知
-    send_notification(advice)
+    send_notification(advice, FLASH_MODEL_ID)
 
 def calculate_angle(p1, p2):
     """计算两点连线与垂直方向的夹角"""
@@ -170,7 +215,7 @@ def main():
                     # 如果检测到跌倒，且概率较高，触发 AI 报警
                     if fall_prob > 0.7:
                         # 开启新线程处理，避免阻塞视频播放
-                        threading.Thread(target=process_alert, args=(fall_prob,)).start()
+                        threading.Thread(target=process_alert, args=(fall_prob, frame)).start()
 
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
 
