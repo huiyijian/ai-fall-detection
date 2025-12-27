@@ -13,14 +13,23 @@ class VideoStreamSimulator:
     模拟实时摄像头行为，支持键盘控制中断，不等待视频播放结束
     """
     def __init__(self, video_path, loop=True):
-        self.video_path = Path(video_path)
+        self.video_path = Path(video_path) if not isinstance(video_path, int) else None
         self.loop = loop
         self.cap = None
         self.fps = 30
         self.frame_count = 0
         self.paused = False
+        self.is_camera = isinstance(video_path, int)
         
     def open(self):
+        if self.is_camera:
+            self.cap = cv2.VideoCapture(self.video_path)
+            if not self.cap.isOpened():
+                raise RuntimeError(f"无法打开摄像头: {self.video_path}")
+            self.fps = 30
+            print(f"已打开摄像头: {self.video_path}")
+            return True
+            
         if not self.video_path.exists():
             raise FileNotFoundError(f"视频文件不存在: {self.video_path}")
         
@@ -41,13 +50,15 @@ class VideoStreamSimulator:
             
         ret, frame = self.cap.read()
         
-        if not ret and self.loop:
+        if not ret and self.loop and not self.is_camera:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self.cap.read()
             
         return frame, ret
         
     def toggle_pause(self):
+        if self.is_camera:
+            return False
         self.paused = not self.paused
         return self.paused
         
@@ -166,7 +177,7 @@ class FallDetector:
 
 class AlertSystem:
     """
-    报警系统 - TTS 语音播报
+    报警系统 - TTS 语音播报（女性声音）
     """
     def __init__(self):
         try:
@@ -174,6 +185,19 @@ class AlertSystem:
             self.engine = pyttsx3.init()
             self.engine.setProperty('rate', 150)
             self.engine.setProperty('volume', 0.9)
+            
+            voices = self.engine.getProperty('voices')
+            if voices:
+                for voice in voices:
+                    voice_name = voice.name.lower()
+                    if 'female' in voice_name or 'huihui' in voice_name or 'xiaoxiao' in voice_name or 'chinese' in voice_name:
+                        self.engine.setProperty('voice', voice.id)
+                        print(f"已设置女性声音: {voice.name}")
+                        break
+                else:
+                    self.engine.setProperty('voice', voices[0].id)
+                    print(f"使用默认声音: {voices[0].name}")
+            
             self.enabled = True
             print("TTS 引擎初始化完成")
         except Exception as e:
@@ -262,7 +286,14 @@ class InteractionMode:
 
 
 def main():
+    
+    # ========== 视频源选择 ==========
+    # 选项 1: 本地视频文件（用于 MVP 演示，当前激活）
     video_path = r"d:\reps\ai_for_detection\ai-fall-detection\1272297698.mp4"
+    
+    # 选项 2: 实时摄像头（用于真实场景，后续取消注释即可）
+    # video_path = 0  # 0 表示默认摄像头
+    # ==================================
     
     simulator = VideoStreamSimulator(video_path, loop=True)
     detector = FallDetector()
@@ -285,7 +316,7 @@ def main():
     print("\n" + "="*50)
     print("跌倒检测系统启动")
     print("按 'q' 退出")
-    print("按 's' 暂停/继续")
+    print("按 's' 暂停/继续（仅视频模式）")
     print("按 'e' 手动进入/退出交互模式")
     print("="*50 + "\n")
     
@@ -299,7 +330,8 @@ def main():
                 
             if key == ord('s'):
                 is_paused = simulator.toggle_pause()
-                print(f"视频流: {'暂停' if is_paused else '继续'}")
+                if not simulator.is_camera:
+                    print(f"视频流: {'暂停' if is_paused else '继续'}")
                 
             if key == ord('e'):
                 if interaction_mode.active:
