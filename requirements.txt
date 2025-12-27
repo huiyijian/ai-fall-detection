@@ -1,3 +1,17 @@
-ultralytics
-opencv-python
-numpy
+# Core Vision & AI
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# API & Networking
+openai>=1.0.0
+requests>=2.31.0
+
+# Audio & Interaction (New)
+pyttsx3>=2.90  # Offline Text-to-Speech
+SpeechRecognition>=3.10.0  # Speech to Text
+pyaudio>=0.2.13  # Microphone access (Requires system dependencies on Linux, works out-of-box on Win)
+
+# Utils
+pillow>=10.0.0  # Image processing
+python-dotenv>=1.0.0  # Environment variables

@@ -15,7 +15,7 @@ BASE_URL = "https://api-inference.modelscope.cn/v1/"
 
 # 模型选择:
 # 1. 快速反应模型 (Flash): 用于第一时间快速判断和给出核心指令
-FLASH_MODEL_ID = "ZhipuAI/GLM-4v-Flash" 
+FLASH_MODEL_ID = "Qwen/QVQ-72B-Preview" 
 # 2. 详细分析模型 (可选): 如果需要更深度的建议，后续可调用 Qwen2.5 或其他大模型
 DETAIL_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
 
@@ -136,10 +136,10 @@ def calculate_angle(p1, p2):
     return math.degrees(angle_rad)
 
 def main():
-    video_path = r"d:\华为选修课大作业\1272297698.mp4"
+    video_path = r"d:\reps\ai_for_detection\ai-fall-detection\407815802.mp4"
     if not os.path.exists(video_path):
         # 如果找不到绝对路径，尝试相对路径
-        video_path = "1272297698.mp4"
+        video_path = "407815802.mp4"
     
     print(f"正在加载 YOLO 模型...")
     try:
